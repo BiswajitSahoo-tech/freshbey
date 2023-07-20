@@ -87,23 +87,62 @@ const getOrderById = asyncHandler(async (req, res) => {
 //     throw new Error('Order not found')
 //   }
 // })
+async function rollback(req, res, itemUpdateLog){
+  const rollbackPromises = itemUpdateLog.map( async (item)=> {
+    await productController.updateStockCount(
+      req,
+      res,
+      item.product,
+      -1*parseInt(item.qty),
+    )
+  })
 
+  try {
+    await Promise.all( rollbackPromises )
+  } catch (error) {
+    console.log('error while rollbacking')
+    // throw error
+  }
+}
 const updateOrderToPaid = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id)
-
+  //creating a new empty log for this transaction, would follow a immidiate modification approach.
+  let itemUpdateLog = []
+  let error = undefined
   if (order) {
     //below .map() function return an array of promises
     const updatePromises = order.orderItems.map(async (item) => {
-      await productController.updateStockCount(
-        req,
-        res,
-        item.product,
-        parseInt(item.qty),
-      )
+      try{
+        // console.log(item.qty)
+        await productController.updateStockCount(
+          req,
+          res,
+          item.product,
+          parseInt(item.qty),
+        )
+        // console.log(item.qty)
+        itemUpdateLog.push(
+                          {
+                            product: item.product, 
+                            qty:item.qty
+                          }
+                          );
+      }catch( err){
+        error = err;
+        
+      }
+      
     })
     //below function to resolve the array of promises
     try {
       await Promise.all(updatePromises)
+      console.log(itemUpdateLog)
+      if(error !== undefined){
+        //here we perform a rollback
+        rollback(req, res, itemUpdateLog)
+        throw error
+      }
+        
     } catch (error) {
       return res.status(404).json({
         status: 'fail',
